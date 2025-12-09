@@ -9,7 +9,6 @@ hf_token = input("Masukkan Hugging Face token Anda (hf_...): ")
 
 # Login ke HF
 login(token=hf_token)
-
 print("✅ Login berhasil ke Hugging Face Hub.")
 
 # Pustaka yang dibutuhkan 
