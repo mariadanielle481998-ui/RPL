@@ -1,0 +1,113 @@
+!pip install -q transformers accelerate torch
+!pip install -q bitsandbytes  #untuk penyederhanaan model
+!pip install -q huggingface_hub # Tambahan untuk mengakses Hugging Face Hub melalui Python
+
+from huggingface_hub import login
+
+# Minta user input token HF (pastikan sudah copy dari https://huggingface.co/settings/tokens)
+hf_token = input("Masukkan Hugging Face token Anda (hf_...): ")
+
+# Login ke HF
+login(token=hf_token)
+
+print("✅ Login berhasil ke Hugging Face Hub.")
+
+# Pustaka yang dibutuhkan 
+import torch                              # PyTorch: backend komputasi tensor
+from transformers import pipeline         # Pipeline Hugging Face untuk tugas NLP siap pakai
+
+# Menentukan model
+model_id = "meta-llama/Llama-3.2-3B-Instruct"
+# ID repositori di Hugging Face Hub berisi checkpoint Llama-3.2-3B versi Instruct
+
+# Membuat pipeline generasi teks
+pipe = pipeline(
+    "text-generation",                    # Jenis tugas: membuat/melanjutkan teks
+    model=model_id,                       # Nama atau path model
+    dtype=torch.bfloat16,           # Format bilangan bfloat16 → lebih ringan di GPU modern (mengganti torch_dtype)
+    device_map="auto",                    # Otomatis menyebar layer ke GPU (atau CPU jika GPU tidak ada)
+)
+
+# Menyiapkan percakapan (format ChatML)
+messages = [
+    {"role": "system", "content": "You are a highschool teacher"},
+    {"role": "user",   "content": "Jelaskan definisi computational thinking"},
+]
+
+# Melakukan inferensi (membuat balasan)
+outputs = pipe(
+    messages,                             # Masukan model berupa daftar pesan
+    max_new_tokens=256,                   # Batas panjang teks yang dihasilkan
+)
+
+# Menampilkan hasil 
+print(outputs[0]["generated_text"][-1])
+
+# Menyusun prompt bergaya “role: konten” 
+prompt = ""
+for message in messages:                 # Iterasi tiap elemen dict pada list messages
+    role = message["role"]               # Contoh: "system" atau "user"
+    content = message["content"]         # Teks asli yang dikirim
+    prompt += f"{role.capitalize()}: {content}\n"  # Gabungkan ke string prompt dengan newline
+prompt += "Assistant:"                   # Sinyal bagi model di mana jawaban harus dimulai
+
+# Melakukan inferensi dengan metode string-prompt 
+# Perlu waktu ±2× lebih lama daripada format ChatML karena seluruh prompt diproses sebagai teks mentah.
+outputs = pipe(
+    prompt,                              # Masukan prompt lengkap
+    max_new_tokens=256,                  # Batas maksimal token yang akan dihasilkan
+    do_sample=True                       # Sampling acak → keluaran lebih bervariasi & kreatif
+)
+
+# Menampilkan hasil akhir
+print(outputs[0]["generated_text"])      # Cetak keseluruhan teks (prompt + balasan model)
+
+!pip install -q gradio
+
+import gradio as gr
+
+# Definisikan fungsi yang akan dipanggil oleh Gradio
+def generate_text_gradio(user_input):
+    # Sesuaikan format pesan untuk model Llama-3.2
+    messages = [
+        {"role": "system", "content": "You are a highschool teacher"},
+        {"role": "user",   "content": user_input},
+    ]
+
+    # Lakukan inferensi menggunakan pipeline yang sudah ada
+    outputs = pipe(
+        messages,
+        max_new_tokens=256,
+        do_sample=True # Gunakan sampling untuk variasi jawaban
+    )
+
+    # Ekstrak teks balasan dari output model
+    # Output format ChatML: outputs[0]["generated_text"][-1]
+    # Output format string-prompt: outputs[0]["generated_text"]
+    # Kita akan ambil teks balasan dari assistant
+    assistant_response = ""
+    for item in outputs[0]["generated_text"]:
+        if isinstance(item, dict) and item.get("role") == "assistant":
+            assistant_response = item.get("content", "")
+            break # Ambil balasan pertama dari assistant
+
+    # Jika tidak ada balasan dalam format ChatML, coba format string-prompt
+    if not assistant_response:
+        # Asumsi output string-prompt dimulai setelah "Assistant:"
+        generated_text = outputs[0]["generated_text"]
+        assistant_response = generated_text.split("Assistant:", 1)[-1].strip()
+
+
+    return assistant_response
+
+# Buat antarmuka Gradio
+iface = gr.Interface(
+    fn=generate_text_gradio,
+    inputs=gr.Textbox(lines=2, placeholder="Masukkan pertanyaan Anda di sini..."),
+    outputs="text",
+    title="Model Guru SMA - Penjelasan Konsep",
+    description="Tanya apa saja tentang konsep pelajaran SMA, saya akan jelaskan."
+)
+
+# Jalankan antarmuka
+iface.launch(debug=True)
